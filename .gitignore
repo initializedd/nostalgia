@@ -1,0 +1,6 @@
+build/
+.cache/
+.vs/
+build.sh
+build.bat
+CMakeSettings.json
