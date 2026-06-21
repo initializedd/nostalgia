@@ -4,19 +4,35 @@
 #include <Windows.h>
 #include <tlhelp32.h>
 #include <iomanip>
+#include <optional>
+#include <glm/glm.hpp>
 
 #include "offsets.hpp"
 
-template <typename T>
-class vec3 {
-public:
-    T x;
-    T y;
-    T z;
+std::optional<glm::vec2> world_to_screen(const glm::vec3& world_pos, const glm::mat4x4& view_matrix, const glm::vec2& resolution) {
+    auto clip = glm::vec4(world_pos, 1.0f) * view_matrix;
 
-    vec3() : x{}, y{}, z{} {}
-    vec3(const T x, const T y, const T z) : x{x}, y{y}, z{z} {}
-};
+    if (clip.w < 0.01f) {
+        return std::nullopt; // behind camera
+    }
+
+    const float inv_w = 1.0f / clip.w;
+    const glm::vec2 ndc = {
+        clip.x * inv_w,
+        clip.y * inv_w
+    };
+
+    glm::vec2 screen_pos = {
+        (ndc.x * 0.5f + 0.5f) * resolution.x,
+        (1.0f - (ndc.y * 0.5f + 0.5f)) * resolution.y
+    };
+
+    if (screen_pos.x < 0.01f || screen_pos.x > resolution.x || screen_pos.y < 0.01f || screen_pos.y > resolution.y) {
+        return std::nullopt; // out of screen
+    }
+
+    return screen_pos;
+}
 
 class nostalgia {
 private:
@@ -141,15 +157,32 @@ public:
         return entities;
     }
 
-    void print_positions() {
+    void print_world_positions() {
         auto entities = get_entities();
         for (int i = 0; i < entities.size(); ++i) {
             auto health = read_mem<int>(entities[i] + g_offset_entity_health);
             if (health > 0) {
-                auto coords = read_mem<vec3<float>>(entities[i] + g_offset_entity_coords);
+                auto coords = read_mem<glm::vec3>(entities[i] + g_offset_entity_coords);
                 std::wcout << "[Entity " << i << "]\n";
                 std::wcout << "Health: " << health << '\n';
                 std::wcout << "X: " << coords.x << ", Y: " << coords.y << ", Z: " << coords.z << "\n\n";
+            }
+        }
+    }
+
+    void print_screen_positions() {
+        auto entities = get_entities();
+        auto view_matrix = read_mem<glm::mat4>(g_offset_view_matrix);
+        auto resolution = read_mem<glm::vec2>(g_offset_resolution);
+        for (int i = 1; i < entities.size(); ++i) { // skips self
+            auto health = read_mem<int>(entities[i] + g_offset_entity_health);
+            if (health > 0) {
+                auto coords = read_mem<glm::vec3>(entities[i] + g_offset_entity_coords);
+                auto screen_pos = world_to_screen(coords, view_matrix, resolution);
+                if (screen_pos.has_value()) {
+                    std::wcout << "[Entity " << i << "]\n";
+                    std::wcout << "X: " << screen_pos.value().x << ", Y: " << screen_pos.value().y << "\n\n";
+                }
             }
         }
     }
@@ -164,7 +197,8 @@ int main() {
     }
 
     client.update_points(9999);
-    client.print_positions();
+    //client.print_world_positions();
+    client.print_screen_positions();
 
     return 0;
 }
